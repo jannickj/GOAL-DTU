@@ -1,0 +1,63 @@
+module gotoSplit(Rank,List){
+	knowledge{
+		% Data reformatting
+		stripList([],[]).
+		stripList([[Value,Vertex]|List],[Vertex|SList]) :- stripList(List,SList). 
+	}
+	program{
+		% List = [[Value,Vertex],[...]] Highest after!
+		if bel(stripList(List,SList), selectDestination(SList,Rank,Vertex)) then advancedGoto(Vertex).
+		% List = [Vertex,...,Vertex]
+		if bel(selectDestination(List,Rank,Vertex)) then advancedGoto(Vertex).
+	}
+}
+
+module gotoNeighbour(Rank,Unknown,Safe){
+	program{
+		if bel( Unknown == true, Safe == true, maxEnergy(E), energyGE(E), currentPos(Here), findall(Neighbour, (visibleEdge(Here,Neighbour), safePos(Neighbour)), Tmp), sort(Tmp,Neighbours), selectNeighbour(Neighbours,Rank,Vertex)) 
+			then advancedGoto(Vertex).
+		
+		if bel( Unknown == true, maxEnergy(E), energyGE(E), currentPos(Here), findall(Neighbour, visibleEdge(Here,Neighbour), Tmp), sort(Tmp,Neighbours), selectNeighbour(Neighbours,Rank,Vertex)) 
+			then advancedGoto(Vertex).
+		
+		if bel( Safe == true, X is Rank + 1, findall(Neighbour, (neighbour(Neighbour), safePos(Neighbour)), Tmp), sort(Tmp,Neighbours), selectNeighbour(Neighbours,X,Vertex) ) 
+			then advancedGoto(Vertex).
+		
+		if bel( X is Rank + 1, findall(Neighbour, neighbour(Neighbour), Tmp), sort(Tmp,Neighbours), selectNeighbour(Neighbours,X,Vertex)) 
+			then advancedGoto(Vertex).
+	}
+}
+
+module advancedGoto(Destination){
+	program{
+		% Goto pre condition checks if we can move over explored edges.
+		if bel( currentPos(Here), not(needSurvey(Here)) ) then {
+			if true then goto(Destination).
+			if true then recharge.
+		}
+		
+		% Recharge to at least 9 energy before moving over an unsurveyed edge.
+		if bel( energyGE(9) ) then goto(Destination).
+		if true then recharge.
+	}
+}
+
+module selectProbe(Rank){
+	program{
+		% Use probe action when I am rank 0 (Highest)
+		if bel( Rank == 0 ) then probe.		
+		% Go to a neighbor if I am not rank 0
+		if true then gotoNeighbour(Rank,true,false).
+		if true then recharge.		
+	}
+}
+
+module selectSurvey(Rank){
+	program{
+		% Use survey action when I am rank 0 (Highest)
+		if bel( Rank == 0 ) then survey.
+		% Go to a neighbor if I am not rank 0
+		if true then gotoNeighbour(Rank,true,false).
+		if true then recharge.
+	}
+}

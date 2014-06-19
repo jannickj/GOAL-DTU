@@ -1,0 +1,4 @@
+426c426
+< 				runtimeManager = LaunchManager.launchMAS(masProgram, true);
+---
+> 				runtimeManager = LaunchManager.launchMAS(masProgram, false);

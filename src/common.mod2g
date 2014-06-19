@@ -1,0 +1,301 @@
+% Makes sure agents process percepts that are relevant to their role
+module selectPercepts{
+	program[order=linearall]{
+		% Handle percepts that everyone uses.
+		if true then commonPercepts.
+		
+		% Handle percepts that are specific to actions
+		if bel(lastAction(survey), lastActionResult(successful)) then surveyVertices.		
+		
+		% Handle percepts specific for your role.
+		if bel(role('Explorer')) then explorerPercepts.
+		if bel(role('Saboteur')) then saboteurPercepts.
+		if bel(role('Repairer')) then repairerPercepts.
+		if bel(role('Inspector')) then inspectorPercepts.
+		if bel(role('Sentinel')) then sentinelPercepts.		
+	}
+}
+
+% Makes sure agents process mail that is relevant to their role
+module selectReceiveMail{
+	program[order=linearall]{
+		% Handle mails that everyone uses.
+		if true then commonReceiveMail.
+		
+		% Handle mails specific for your role.
+		if bel(role('Explorer')) then explorerReceiveMail.
+		if bel(role('Saboteur')) then saboteurReceiveMail.
+		if bel(role('Repairer')) then repairerReceiveMail.
+		if bel(role('Inspector')) then inspectorReceiveMail.
+		if bel(role('Sentinel')) then sentinelReceiveMail.
+		
+		% Handle mails that disabled agents need.
+		if bel(disabled) then disabledReceiveMail.
+		
+		% Clean up mailbox.
+		if true then clearMailbox.
+	}
+}
+
+% Module that performs some initial percept handling and allows the agent to start sending actions
+module simStartPercepts{
+	program [order=linearall] {
+		% Insert some dummy values for certain predicates, to allow updating them
+		if true then insert(oldZone(unknown), lastPos(unknown), step(unknown)).
+		if true then insert(currentPos(unknown), zoneScore(unknown), health(unknown)).
+		if true then insert(decidedSwarmAt(0), currentSwarmValue(0), swarmPosition(unknown), harassStart(0)).
+		if true then insert(needExploring(unknown)).
+		
+		% Insert a dummy value for our teammates' positions
+		forall bel(me(Me), !, agent(Agent), Me \= Agent) do insert(teamStatus(Agent, unknown, 10)).
+							
+		% Tell the others your role
+		if bel(percept(role(R)), me(Id), not(role(Id, _))) 
+			then insert(role(Id, R)) + send(allother,role(R)).
+		
+		% Insert some info about the match and the map
+		if bel(percept(steps(X))) then insert(steps(X)).
+		if bel(percept(edges(X))) then insert(edges(X)).
+		if bel(percept(vertices(X))) then insert(vertices(X)).
+		
+		% Dummyvalue for lastattacked for saboteur
+		if bel(role('Saboteur')) then insert(lastAttacked('')).
+		
+		% Drop any goals that we may have
+		if goal(optimum) then drop(optimum).
+		if goal(swarm) then drop(swarm).
+		forall goal(harass(X)) do drop(harass(X)).
+		forall goal(hunt(X)) do drop(hunt(X)).
+		forall goal(repairing(X)) do drop(repairing(X)).
+			
+		% Explore should have a goal to find an optimal node
+		if bel(role('Explorer')) then adopt(optimum).		
+	}
+}
+
+% Module that can be called to reset the agent to a clean state ready to start a new match
+module resetBeliefs{
+	program[order=linearall]{	
+		% Delete some role specific information(deleting takes a bit of time, hence the role check)
+		if bel(lastAttacked(X)) then delete(lastAttacked(X)).
+		forall bel(lastInspect(Id, X)) do delete(lastInspect(Id, X)).
+		forall bel(needExploring(X)) do delete(needExploring(X)).
+		if bel(decidedSwarmAt(X)) then delete(decidedSwarmAt(X)).
+		if bel(currentSwarmValue(X)) then delete(currentSwarmValue(X)).
+		if bel(repairing(X)) then delete(repairing(X)).
+		if bel(harassStart(X)) then delete(harassStart(X)).
+		if bel(hasCheckedHarass) then delete(hasCheckedHarass).
+		
+		% Throw out information from the previous match
+		if bel(health(H)) then delete(health(H)).
+		if bel(steps(X)) then delete(steps(X)).
+		if bel(vertices(X)) then delete(vertices(X)).
+		if bel(edges(X)) then delete(edges(X)).
+		if bel(swarmPosition(X)) then delete(swarmPosition(X)).
+
+		% Forget your mates status (in case of a new random assignment)
+		forall bel(role(Id, Role)) do delete(role(Id, Role)).
+		forall bel(teamStatus(Id, Pos, HP)) do delete(teamStatus(Id, Pos, HP)).
+		
+		% More garbage deleting
+		forall bel(enemyStatus(Id, Vertex, State)) do delete(enemyStatus(Id, Vertex, State)).
+		if bel(currentPos(X)) then delete(currentPos(X)).
+		if bel(lastPos(X)) then delete(lastPos(X)).
+		if bel(step(X)) then insert(not(step(X))).
+		if bel(zoneScore(X)) then delete(zoneScore(X)).
+		if bel(oldZone(X)) then delete(oldZone(X)).
+		forall bel( vertex(Id, Value, List) ) do delete( vertex(Id, Value, List) ).
+		forall bel(inspectedEntity(Id, Team, Role, Vertex, Energy, MaxEnergy, Health, MaxHealth, Strength, VisRange))
+			do delete(inspectedEntity(Id, Team, Role, Vertex, Energy, MaxEnergy, Health, MaxHealth, Strength, VisRange)).
+			
+		% After deleting all garbage make sure no new actions are sent, and the agent is ready for a new simstart
+		if true then insert(donePercepts, doneMailing, doneAction, ready).
+	}
+}
+		
+% Module that processes percepts that are received from the environment
+module commonPercepts{
+	knowledge{
+		statusUser(ID) :- role(ID,'Saboteur').
+		statusUser(ID) :- role(ID,'Repairer').
+		statusChanged  :- lastAction(goto), lastActionResult(successful), !.
+		statusChanged  :- health(OldHP), percept(health(NewHP)), integer(OldHP), integer(NewHP), OldHP \= NewHP.
+
+		newVertices(1,L) :- percept(position(Cur)), visibleEdgesList(Cur,NBs), (not(vertex(Cur,_,_)) -> L = [v(Cur,NBs)] ; L = []).
+		newVertices(2,L) :- percept(position(Cur)), visibleEdgesList(Cur,NBs), findall(v(V,VNBs), (member([unknown,V],NBs), not(vertex(V,_,_)), visibleEdgesList(V,VNBs)), Tmp), !, ( not(vertex(Cur,_,_)) -> sort([v(Cur,NBs)|Tmp],L) ; sort(Tmp,L) ).
+		newVertices(VR,L) :- VR > 2, percept(position(Cur)), visibleEdgesList(Cur,NBs), findall(v(V,VNBs), (member([unknown,V],NBs), not(vertex(V,_,_)), visibleEdgesList(V,VNBs)), Tmp), !, findall(v(W,WNBs), (member(V,Tmp), visibleEdgesList(V,VNBs), member(W,VNBs), not(vertex(W,_,_)), visibleEdgesList(W,WNBs)), Tmp2), !, append(Tmp,Tmp2,Tmp3), ( not(vertex(Cur,_,_)) -> sort([v(Cur,NBs)|Tmp3],L) ; sort(Tmp3,L) ).
+	}
+	program[order=linearall]{
+		% Record any new vertices
+		if bel(percept(visRange(VR)), newVertices(VR,L), L = [_|_]) then send(allother,newPerceivedVertices(L)) + insert(allNewVertices(L)).
+		forall bel(allNewVertices(L), member(v(V,NBs),L), not(vertex(V,_,_))) do insert(vertex(V,unknown,NBs)).
+		if bel(allNewVertices(L)) then delete(allNewVertices(L)).
+
+		%Keep track of zoneScore
+		if bel(percept(zoneScore(Z)), zoneScore(X), oldZone(Y)) then insert( not(zoneScore(X)), not(oldZone(Y)), oldZone(X), zoneScore(Z) ).
+		
+		% Keep track of the vertex you were on before you got here.
+		if bel(percept(position(Cur)), currentPos(Old), !, Old \= Cur) then {
+			if bel(tookShortcut) then delete( tookShortcut ).
+			if bel(lastPos(P)) then insert (not(lastPos(P)), lastPos(Old)).
+		}
+		
+		% Update current location
+		if bel(percept(position(Cur)), currentPos(Old))
+			then insert(not(currentPos(Old)), currentPos(Cur)).
+ 		
+		% Swarm goal managing, when we have received a swarm position
+		if not(goal(swarm)), bel(hasSwarmPos(_), timeToSwarm) then adopt(swarm).
+		
+		% Check if the found optimum wasn't wrong
+		forall bel(optimum(O), currentPos(Here), vertex(Here, Value, _), vertex(O, OValue, _), vertexValueGT(Value,OValue))
+			do insert(not(optimum(O)), optimum(Here)) + send(allother, optimum(Here)).
+		
+		% Tell the others your status
+		if bel(percept(position(Pos)), percept(health(HP)), statusChanged) then send(allother,teamStatus(Pos,HP)). 
+		
+		% Update the agents health
+		if bel(percept(health(H)), health(Current), !, H \= Current) then insert(not(health(Current)), health(H)).
+			
+		% If you can see an enemy and an ally cannot then inform the agent
+		if bel(agentRankHere(0), enemyTeam(T), me(Me), currentPos(V), findall([E,P,X], (visibleEntity(E,P,T,X), not(enemyStatus(E,P,X))), L), L \= []) then {
+			forall bel(agent(ID), ID \= Me, statusUser(ID), not(visibleEntity(ID,V,_,_))) do send(ID,enemyStatusPack(L)).
+		}
+		
+		% Keep track of the status of enemy agents
+		forall bel(enemyTeam(T), visibleEntity(ID,Vertex,T,Status), not(enemyStatus(ID,_,_)))
+			do insert(enemyStatus(ID,Vertex,Status)).
+		forall bel(enemyStatus(ID,StoredVertex,StoredStatus), visibleEntity(ID,ActualVertex,_,ActualStatus), (StoredVertex \= ActualVertex ; StoredStatus \= ActualStatus))
+			do insert(not(enemyStatus(ID,StoredVertex,StoredStatus)), enemyStatus(ID,ActualVertex,ActualStatus)).
+	}
+}
+ 		
+% Module that processes messages from other agents
+module commonReceiveMail{
+	knowledge{
+		processInspectedEntityMails(L) :- 
+			findall(ie(Id,T,R,V,E,ME,H,MH,S,VR),(received(_,reinspectedEntityPack(PL1)),member([ieNew(Id,T,R,V,E,ME,H,MH,S,VR),_],PL1)), Tmp), !, 
+			findall(ie(Id,T,R,V,E,ME,H,MH,S,VR),(received(_,newInspectedEntityPack(PL2)),member(ie(Id,T,R,V,E,ME,H,MH,S,VR),PL2)),Tmp2), !, 
+			append(Tmp,Tmp2,Tmp3), sort(Tmp3,S), fixIEDuplicates(S,L).
+		
+		fixIEDuplicates([],[]).
+		fixIEDuplicates([H|T],[H|L]) :- H = ie(Id,_,_,_,_,_,_,_,_,_), fixIEDuplicates2(Id,T,T2), fixIEDuplicates(T2,L).
+		
+		fixIEDuplicates2(_,[],[]).
+		fixIEDuplicates2(Id,[H|T],L) :- H = ie(Id,_,_,_,_,_,_,_,_,_), fixIEDuplicates2(Id,T,L).
+		fixIEDuplicates2(Id,[H|T],[H|T]) :- H = ie(Id2,_,_,_,_,_,_,_,_,_), Id \= Id2.
+		
+	}
+	program[order=linearall]{
+		% Record any new vertices
+		forall bel(received(A,newPerceivedVertices(L)), member(v(V,NBs),L), not(vertex(V,_,_))) do insert(vertex(V,unknown,NBs)).
+
+		% Update edge/node values for (non)existing vertices
+		forall bel(received(A,vertex(Id,Value,NewList)), not(vertex(Id,_,_))) do 
+			delete(received(A,vertex(Id,Value,NewList))) + insert(vertex(Id,Value,NewList)).
+		forall bel(received(A,vertex(Id,Value,NewList)), vertex(Id,Value,OldList)) do
+			delete(received(A,vertex(Id,Value,NewList))) + insert(not(vertex(Id,Value,OldList)), vertex(Id,Value,NewList)).
+
+		% Update probe values for (non)existing vertices
+		forall bel(received(A,vertexProbed(Id,Value,List)), not(vertex(Id,_,_))) 
+			do delete(received(A,vertexProbed(Id,Value,List))) + insert(vertex(Id,Value,List)).
+		forall bel(received(A,vertexProbed(Id,Value,TheirList)), vertex(Id,unknown,List)) 
+			do delete(received(A,vertexProbed(Id,Value,TheirList))) + insert(not(vertex(Id,unknown,List)), vertex(Id,Value,List)).
+			
+		% Swarm location receiving
+		if bel(received(Agent, swarmPosition(Opt)), swarmPosition(Old))
+			then insert(not(swarmPosition(Old)), swarmPosition(Opt)) + delete(received(Agent, swarmPosition(Opt))).
+		
+		% Agent roles
+		forall bel(received(Agent,role(Role))) do insert(role(Agent,Role)) + delete(received(Agent,role(Role))).
+        
+		% Agent locations and status
+		forall bel(received(Agent,teamStatus(Pos,HP)), teamStatus(Agent,OldPos,OldHP), (Pos \= OldPos ; HP \= OldHP)) 
+			do insert(teamStatus(Agent,Pos,HP)) + delete(teamStatus(Agent,OldPos,OldHP), received(Agent,teamStatus(Pos,HP))).
+		forall bel(received(Agent,teamStatus(Pos,HP))) do delete(received(Agent,teamStatus(Pos,HP))).
+		
+		% inspectedEntities
+		forall bel(processInspectedEntityMails(L), member(ie(Id,T,R,V,E,ME,H,MH,S,VR), L)) do {
+			if bel(not(inspectedEntity(Id,_,_,_,_,_,_,_,_,_))) then insert(inspectedEntity(Id,T,R,V,E,ME,H,MH,S,VR)).
+			if bel(inspectedEntity(Id,T,R,V2,E2,ME2,H2,MH2,S2,VR2)) then insert(not(inspectedEntity(Id,T,R,V2,E2,ME2,H2,MH2,S2,VR2)), inspectedEntity(Id,T,R,V,E,ME,H,MH,S,VR)).
+		}
+		
+		
+		% When you get a percept of an inspected enemy, replace the last inspection of that entity.
+		% forall bel(received(_, inspectedEntity(Id, Team, Role, Vertex, Energy, MaxEnergy, Health, MaxHealth, Strength, VisRange)), 
+				% inspectedEntity(Id, Team, Role, V2, E2, ME2, H2, MH2, S2, VS2))
+			% do insert(not(inspectedEntity(Id, Team, Role, V2, E2, ME2, H2, MH2, S2, VS2)), 
+				% inspectedEntity(Id, Team, Role, Vertex, Energy, MaxEnergy, Health, MaxHealth, Strength, VisRange)).
+		% % When you get a percept of an inspected enemy, and it has never been inspected before, insert it.
+		% forall bel(received(_, inspectedEntity(Id, Team, Role, Vertex, Energy, MaxEnergy, Health, MaxHealth, Strength, VisRange)), 
+				% not(inspectedEntity(Id, _, _, _, _, _, _, _, _, _)))
+			% do insert(inspectedEntity(Id, Team, Role, Vertex, Energy, MaxEnergy, Health, MaxHealth, Strength, VisRange)).
+		% 
+		% Save any new information about the enemy.
+		forall bel(received(ID,enemyStatusPack(L))) do {
+			forall bel(member([E,V,X], L)) do {
+				if bel(not(enemyStatus(E,_,_))) then insert(enemyStatus(E,V,X)).
+				if bel(enemyStatus(E,OV,Y), (V \= OV ; X \= Y), not(visibleEntity(E,_,_,_))) then insert(not(enemyStatus(E,OV,Y)), enemyStatus(E,V,X)).
+			}
+		}
+		forall bel(enemyStatus(A,B1,C1), !, enemyStatus(A,B2,C2), (B1 \= B2 ; C1 \= C2)) do delete(enemyStatus(A,B2,C2)).
+	}
+}
+
+% Clears out received messages and sent messages, these are now processed and irrelevant, hence slowing down the queries for no reason
+module clearMailbox{
+	program[order=linearall]{
+		forall bel(received(Agent,Message)) do delete(received(Agent,Message)).
+		forall bel(sent(Agent,Message)) do delete(sent(Agent,Message)).
+	}
+}
+
+% Behavior when swarming
+module swarm{
+	knowledge{
+		shouldDefend :- lastActionResult(failed_attacked), !.
+		shouldDefend :- enemyHere(ID), dangerousEnemy(ID), !.
+		shouldDefend :- enemyNear(ID,V), inspectedEnemy(ID,'Saboteur'), not((lastAction(parry), lastActionResult(useless))).
+	}
+	program{
+		if bel(hasSwarmPos(Pos), neighbour(Pos)) then advancedGoto(Pos).
+		if bel(hasSwarmPos(Pos), currentPos(V), V \= Pos, path(V,Pos,[V,Next|_],_)) then advancedGoto(Next).
+		if bel(currentPos(V), hasSwarmPos(V), shouldDefend) then defense.
+		if true then recharge.
+	}
+}
+
+
+% The common explore module that works for every agent and explores the graph and its edges
+module explore {
+	program {
+		% if there are edges with unknown weight around the current node survey them
+		if bel(currentPos(Here), !, needSurvey(Here), agentRankHere(Rank)) 
+			then selectSurvey(Rank).
+
+		% Find closest unsurveyed vertex
+		if bel(allAlone, currentPos(Start), pathClosestNonSurveyed(Start, NonSurveyedVertex, [Here,Next|Path], Dist)) 
+			then advancedGoto(Next).
+
+		% When multiple agents are on the node and there is an unsurveyed neighbor, try to split up.
+		if bel(not(allAlone), agentRankHere(Rank), neighbourNeedSurvey(Any)) then gotoNeighbour(Rank, true, false).
+			
+		% find a better(higher value) node to chill on
+		if bel(currentPos(Here), !, neighbour(There), safePos(There), 
+			vertexValue(Here,Value1), vertexValue(There,Value2), vertexValueGE(Value2,Value1))
+			then advancedGoto(There).
+		
+		% lack of better node, go to an unprobed one.
+		if bel(neighbour(There), vertexValue(There,unknown), safePos(There)) 
+			then advancedGoto(There).
+		
+		% find a safe place to stand
+		if bel(neighbour(There), safePos(There)) 
+			then advancedGoto(There).
+		
+		% keep moving
+		if bel(currentPos(Here), not(safePos(Here)), neighbour(Here, There)) 
+			then advancedGoto(There).
+	}
+}
+

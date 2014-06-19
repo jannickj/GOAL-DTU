@@ -1,0 +1,26 @@
+30a31
+> import eis.iilang.Parameter;
+65a67,71
+> 		try {
+> 			setState(EnvironmentState.INITIALIZING);
+> 		} catch (ManagementException e2) {
+> 			e2.printStackTrace();
+> 		}
+103,110d108
+< 		
+< 		// set the state
+< 		try {
+< 			setState(EnvironmentState.PAUSED);
+< 		} catch (ManagementException e1) {
+< 			e1.printStackTrace();
+< 		}
+< 
+410a409
+> 	
+412,413c411,413
+< 	public boolean isInitSupported() {
+< 		return false;
+---
+> 	public void init(Map<String, Parameter> parameters) throws ManagementException {
+> 		// set the state
+> 		setState(EnvironmentState.PAUSED);

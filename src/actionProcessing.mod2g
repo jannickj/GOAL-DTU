@@ -1,0 +1,52 @@
+module surveyVertices{
+	program[order=linear]{		
+		% Search for and update current vertex.
+		if bel(currentPos(Id1), !,vertex(Id1,Value,List), 
+				findall([W, Id2], (percept(surveyedEdge(Id1,Id2,W)); percept(surveyedEdge(Id2,Id1,W))), Array))
+			then insert(not(vertex(Id1,Value,List)), vertex(Id1,Value,Array)) + send(allother,vertex(Id1,Value,Array)).
+		% Other statement is false so do not search. Insert new vertex
+		if bel(currentPos(Id1), !,
+				findall([W, Id2], (percept(surveyedEdge(Id1,Id2,W)); percept(surveyedEdge(Id2,Id1,W))), Array))
+			then insert(vertex(Id1,unknown,Array)) + send(allother,vertex(Id1,unknown,Array)).					
+	}
+}
+
+module probeVertices{
+	program[order=linear]{
+		% Search for and update current vertex.
+		if bel(percept(probedVertex(Id1,Value)),vertex(Id1,V,List)) then			
+			insert(not(vertex(Id1,V,List)), vertex(Id1,Value,List)) 
+			+ send(allother,vertexProbed(Id1,Value,List)).
+		% Other statement is false so do not search. Insert new vertex.			
+		if bel(percept(probedVertex(Id1,Value)), visibleEdgesList(Id1,List)) then	
+			insert(vertex(Id1,Value,List)) + send(allother,vertexProbed(Id1,Value,List)).		
+	}
+}
+
+module inspectEntityPercept{
+	knowledge{
+		upgradeableAttributesUsers(L) :- findall(A,(agent(A),role(A,'Saboteur')),L), !.
+		reinspectedEntities(L) :- findall([ieNew(Id,T,R,V,E,ME,H,MH,S,VR),ieOld(Id,T,R,V2,E2,ME2,H2,MH2,S2,VS2)], (percept(inspectedEntity(Id,T,R,V,E,ME,H,MH,S,VR)), enemyTeam(T), inspectedEntity(Id,T,R,V2,E2,ME2,H2,MH2,S2,VS2)), Tmp), !, sort(Tmp,L).
+		newInspectedEntities(L) :- findall(ie(Id,T,R,V,E,ME,H,MH,S,VR), (percept(inspectedEntity(Id,T,R,V,E,ME,H,MH,S,VR)), enemyTeam(T), not(inspectedEntity(Id,_,_,_,_,_,_,_,_,_))), Tmp), !, sort(Tmp,L).
+	}
+	program[order=linearall]{
+		% When you get a percept of an inspected enemy, replace the last inspection of that entity and send the percept to all other agents that need them.
+		if bel(reinspectedEntities(L), L = [_|_]) then insert(allReinspected(L)).
+		if bel(allReinspected(L)) then {
+			forall bel(upgradeableAttributesUsers(IDs), member(ID,IDs)) do send(ID,reinspectedEntityPack(L)).
+		}
+		forall bel(allReinspected(L), member([ieNew(Id,T,R,V,E,ME,H,MH,S,VR),ieOld(Id,T,R,V2,E2,ME2,H2,MH2,S2,VR2)],L)) do insert(not(inspectedEntity(Id,T,R,V2,E2,ME2,H2,MH2,S2,VR2)), inspectedEntity(Id,T,R,V,E,ME,H,MH,S,VR)).
+		if bel(allReinspected(L)) then delete(allReinspected(L)).
+		
+		% When you get a percept of an inspected enemy, and it has never been inspected before, insert it and send the percept to all other agents.
+		if bel(newInspectedEntities(L), L = [_|_]) then insert(allNewInspected(L)) + send(allother,newInspectedEntityPack(L)).
+		forall bel(allNewInspected(L), member(ie(Id,T,R,V,E,ME,H,MH,S,VR),L), not(inspectedEntity(Id,T,R,V,E,ME,H,MH,S,VR))) do insert(inspectedEntity(Id,T,R,V,E,ME,H,MH,S,VR)).
+		if bel(allNewInspected(L)) then delete(allNewInspected(L)).
+
+		% Insert last time I inspected an agent.
+		if bel(percept(inspectedEntity(Id,_,'Saboteur',_,_,_,_,_,_,_)), lastInspect(Id,LI), step(S)) then insert(not(lastInspect(Id,LI)), lastInspect(Id,S)).
+		if bel(percept(inspectedEntity(Id,_,'Saboteur',_,_,_,_,_,_,_)), not(lastInspect(Id,_)), step(S)) then insert(lastInspect(Id,S)).
+	}
+}
+
+

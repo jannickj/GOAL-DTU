@@ -1,0 +1,180 @@
+init module {
+	knowledge{
+		% Contains general reasoning rules
+		#import "generalKnowledge.pl".
+			
+		% Contains some rules that allow the agent to extract information from the percepts
+		#import "perceptKnowledge.pl".
+			
+		% Contains role specific knowledge rules
+		#import "roleKnowledge.pl".
+			
+		% Contains algorithms used for pathfinding
+		%#import "dijkstra.pl".
+		#import "astar.pl".
+		#import "pathfinding".
+			
+		% Contains rules about navigational subjects
+		#import "navigationKnowledge.pl".
+		
+		% For debugging (should not be imported during the tournament!)
+		%#import "debugging.pl".
+	}
+	
+	beliefs{
+		% Makes sure the agent doesnt try to execute actions while the server is not started on startup
+		doneAction.
+		donePercepts.
+		doneMailing.
+		
+		% Our team name
+		team('GOAL-DTU').
+		
+		ready.
+	}
+	
+	goals{
+		% Goals are dynamically inserted in the percept rules later on
+	}
+	
+	% Define actions that can be sent to the environment interface
+	% Also specify what needs to be true in order to perform the actio
+	% and what should be inserted into the belief base afterwards
+	actionspec{
+		% Insert doneAction after each action to make sure no new actions are performed in this step(manual scheduling)
+		% All actions check if the agent meets the energy requirements, and for actions that require the agent to be enabled it will check if they are not disabled
+		
+		recharge {
+			pre { true }
+			post { doneAction }
+		}
+		buy(Upgrade) {
+			pre { not(disabled), moneyGE(2), energyGE(2), role('Saboteur') }
+			post { doneAction }
+		}
+		probe {
+			pre { not(disabled), energyGE(1), role('Explorer') }
+			post { doneAction }
+		}
+		parry {
+			pre { not(disabled), energyGE(2), not(role('Explorer')), not(role('Inspector')) }
+			post { doneAction }
+		}
+		survey {
+			pre { not(disabled), energyGE(1) }
+			post { doneAction }
+		}
+		
+		% Only move over an edge when you actually have enough energy to do so
+		% OR: Sometimes the edge you want to cross is not surveyed yet, but do make sure you try to move to a neighbour
+		% (see canGoto/2 in navigationKnowledge.pl)
+		goto(There) { 
+			pre { currentPos(Here), canGoto(Here, There) }
+			post{ doneAction }
+		}
+		
+		skip {
+			pre { true }
+			post { doneAction }
+		}
+		% Only repair agents of the same team, if they are visible, and not yourself!
+		repair(Agent) {
+			pre { team(Team), me(Me), visibleEntity(Agent,V,Team,_), energyRangedGE(3,V), Agent \= Me, role('Repairer') }
+			post { doneAction }
+		}
+		% Only attack visible enemies. Keep track of who you last attacked for strategic purposes
+		attack(Agent) {
+			pre { not(disabled), enemyTeam(T), visibleEntity(Agent,V,T,_), energyRangedGE(2,V), lastAttacked(X), role('Saboteur') }
+			post { not(lastAttacked(X)), lastAttacked(Agent), doneAction }
+		}
+		inspect(ID) {
+			pre { not(disabled), visibleEntity(ID,V,T,_), energyRangedGE(2,V), enemyTeam(T), role('Inspector') }
+			post { doneAction }
+		}
+	}
+}
+
+% Main module which is executed every cycle, rules are considered linearly by default
+main module{
+	knowledge {
+		dangerousPosition :- currentPos(Here), not(safePos(Here)), not(pathClosestRepairer(Here,_,_,[Here,_|_],_)).
+	}
+	program {
+		% Only try to find a new action when one was not chosen in this step yet
+		if bel(not(doneAction)) then { 
+			
+			% If disabled get yourself fixed as soon as possible
+			if bel(disabled, not(role('Repairer'))) then disabled.	
+
+			% We should be very cautious if we risk being disabled and cannot find a repairer
+			if bel(dangerousPosition, not(role('Saboteur')), not(role('Repairer'))) then defense.
+			
+			% Otherwise enter your role specific module to do something useful with your role
+			if bel(role('Repairer')) then repairerAction.
+			if bel(role('Inspector')) then inspectorAction.
+			if bel(role('Explorer')) then explorerAction.
+			if bel(role('Saboteur')) then saboteurAction.
+			if bel(role('Sentinel')) then sentinelAction.			
+			
+			% Aparently you had nothing role specific to do, so do some exploring
+			if bel(true) then explore.
+			
+			% If no action could be found just send a skip to 'no valid action received in time'
+			if bel(true) then skip.
+		}	
+	}
+}
+
+% Importing all the modules that are used for choosing an action
+
+% This is a module that contains common behavior that each agent should perform
+#import "common.mod2g".
+
+% The following modules contain role specific behavior
+#import "explorer.mod2g".
+#import "saboteur.mod2g".
+#import "repairer.mod2g".
+#import "sentinel.mod2g".
+#import "inspector.mod2g".
+
+% This module contains general behavior for disabled agents, but not Repairers
+#import "disabled.mod2g".
+
+% This module contains some administrative rules that have to be performed after specific actions
+#import "actionProcessing.mod2g".
+
+% This module contains rules that allow for pathfinding and moving
+#import "pathing.mod2g".
+
+% This module contains rules required by an agent to defend itself in times of danger
+#import "defense.mod2g".
+
+% Event module which is called every GOAL cycle and is used for handling percepts, as well as updating the belief and goal base before an action is selected
+event module{
+	program{	
+		% When a new step is detected allow the program to process the percepts, mails from other agents and choose a new action		
+		if bel(percept(step(Current)), step(Old), !, Old \= Current) then {
+			if bel(Old == unknown)
+				then insert(not(step(Old)), not(donePercepts), not(doneMailing), not(doneAction), step(Current)).
+			% The integer part is to keep unknown from getting in the arithmetic.. should be catched by the rule above but sometimes isn't
+			if bel(integer(Old), Current > Old)
+				then insert(not(step(Old)), not(donePercepts), not(doneMailing), not(doneAction), step(Current), not(hasCheckedHarass)).
+		}
+			
+		% simEnd, reset the agents belief base and also stop the agent from sending actions
+		if bel(percept(simEnd)) then resetBeliefs + clearMailbox.
+			
+		% If we control the whole map then just recharge. Processing all the percepts and subsequent mails takes too long!
+		if bel(not(percept(simStart)), team(T), aggregate_all(count, (percept(visibleVertex(V,T)), team(T)), N), !, vertices(Vs), M is 0.9*N, M > Vs) then recharge.
+		
+		% if the percepts and mails are not handled do so, and make sure it doesn't happen again before the next step
+		if bel(not(donePercepts)) then selectPercepts + insert(donePercepts).				
+		if bel(donePercepts, not(doneMailing)) then selectReceiveMail + insert(doneMailing).
+		
+		% simStart percepted, but im not ready for a new match! Quickly prepare for a new match
+		if bel(percept(simStart), not(ready)) then resetBeliefs.
+		
+		% simStart percepted and ready, handle the simStartpercepts and allow the program to send actions again
+		if bel(percept(simStart), ready) then delete(ready) + simStartPercepts.
+	}
+}

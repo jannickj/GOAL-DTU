@@ -1,0 +1,29 @@
+module sentinelPercepts{
+	program[order=linearall]{
+		if true then exit-module.
+	}
+}
+
+module sentinelReceiveMail{
+	program[order=linearall]{
+		if true then exit-module.
+	}
+}
+
+module sentinelAction{
+	program{
+		% Defend if my current location has dangerous enemies nearby.
+		if bel(currentPos(Here), not(safePos(Here))) then defense.
+		
+		% Swarm if I am in the optimum zone.
+		if a-goal(swarm) then swarm.
+		
+		% Move towards the swarm position if I am not in it.
+		if bel(hasSwarmPos(X), currentPos(Pos), path(Pos,X,[Here,Next|Path],_)) 
+			then advancedGoto(Next).
+			
+		% Explore the map.
+		if true then explore.
+	}
+}
+

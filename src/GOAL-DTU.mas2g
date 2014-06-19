@@ -1,0 +1,15 @@
+%% The agent team's mas2g file
+%% This file contains several parameters required for launching the GOAL agent team
+
+environment {
+	"eismassim-2.1-changed.jar".
+}
+
+agentfiles {
+	"GOAL-DTU.goal"  [name=mapc].
+}
+
+launchpolicy {
+	% Launch all the agents with names that correspond to the ones they have in the simulation.
+	when [type=mars2013entityunknown]@env do launch *:mapc.
+}

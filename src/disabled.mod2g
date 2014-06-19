@@ -1,0 +1,36 @@
+module disabledReceiveMail{
+	program[order=linearall]{
+		if true then exit-module.
+	}
+}
+
+module disabled{
+	program{
+		% If we are at a vertex with a Repairer (and we are not a Repairer) then we should just wait
+	        if bel(not(role('Repairer')), currentPos(V), visibleEntity(ID,V,_,_), role(ID,'Repairer')) then recharge.
+	
+		% Wait for nearby Repairer when you are a Repairer and other Repairer has a higher priority.
+		if bel(role('Repairer'), role(Agent,'Repairer'), me(Name), Agent \= Name, visibleEntity(Agent,Pos,_,_), (neighbour(Pos) ; currentPos(Pos)), compareAgents(Name,Agent,Agent)) then recharge.
+		
+		% Wait for nearby Repairer when you are not a Repairer
+		if bel(not(role('Repairer')), role(Agent,'Repairer'), visibleEntity(Agent,Pos,_,_)) then {
+			if not(goal(swarm)), bel(randomFloat(X)) then {
+				if bel(X > 0.25, neighbour(Pos)) then recharge.
+				if bel(X =< 0.25, neighbour(Pos)) then advancedGoto(Pos).
+				if bel(currentPos(Pos)) then recharge.
+			}
+		}
+			
+		% Find nearest Repairer.
+		if bel(neighbour(V), team(T), visibleEntity(ID,V,T,_), role(ID,'Repairer')) then advancedGoto(V).
+		if bel(currentPos(Here), pathClosestRepairer(Here,_,_,[Here,Next|_],_)) then advancedGoto(Next).
+		
+		% Goto nearest unknown vertex to expand the known graph, hopefully enabling a path to a Repairer
+		if bel(neighbour(N), not(vertex(N,_,_))) then advancedGoto(N).
+		if bel(currentPos(Here), pathClosestUnknownVertex(Here,_,[Here,Next|_],_), not(lastPos(Next))) then advancedGoto(Next).
+
+		% If there are no unknown vertices then why can't you find a path to the nearest Repairer?
+		if true then recharge.
+	}
+}
+

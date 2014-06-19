@@ -1,0 +1,40 @@
+module inspectorPercepts{
+	program[order=linearall]{
+		% Process inspect data.
+		if bel(lastAction(inspect), lastActionResult(successful)) then inspectEntityPercept.
+	}
+}
+
+module inspectorReceiveMail{
+	program[order=linearall]{
+		if true then exit-module.
+	}
+}
+
+module inspectorAction {
+	program {
+		% Inspect when possible
+		if bel( uninspectedNear(ID) ) then {
+			if true then inspect(ID).
+			if true then recharge.
+		}
+		
+		% Defend yourself when not safe
+		if bel(currentPos(Here), not(safePos(Here))) then defense.
+		
+		% Find someone to inspect
+		if bel( currentPos(Here), !, visibleEntity(Agent, There, Team, _), enemyTeam(Team), 
+				(uninspectedEntity(Agent); (inspectedEnemy(Agent, 'Saboteur'),lastInspect(Agent,LI), step(S), LI2 is LI + 50, LI2 < S)), !, 
+				path(Here, There, [Here,Next|GotoPath],_), ! )
+			then advancedGoto(Next).
+		
+		% Swarm
+		if a-goal(swarm) then swarm.
+		
+		% Walk towards the swarm position
+		if bel(hasSwarmPos(X), currentPos(Pos), path(Pos,X,[Here,Next|Path],_)) then advancedGoto(Next).
+		
+		% Randomly explore if nothing else
+		if true then explore.
+	}
+}

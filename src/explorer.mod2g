@@ -1,0 +1,196 @@
+% Belief base management specific to the Explorers
+module explorerPercepts{
+	knowledge {
+		calcSwarms(Chosen, Value) :-
+		    decideOptimums(Opts), findall((Val,Swarm), (member(Opt,Opts), calcAreaControl(Opt,Swarm,Val)), L),
+		    sort(L,S), length(S,N), nth1(N,S,(Value,Chosen)), !.
+		
+		% Python-DTU's algorithm for calculating swarm positions, reimplementation in GOAL
+
+		% calcAreaControl returns pairs of agents and vertices which determine where the agents shall stand when swarming
+		% Chosen = agent-vertex pairs
+		calcAreaControl(Opt,Chosen,Value) :-
+		    allVertices(Tmp), delete(Tmp,Opt,Vs),
+		    swarmAgents([A|AT]), cacAux(Vs,AT,[Opt],Rest), Chosen = [(A,Opt)|Rest], 
+		    swarmValue(Chosen, Value), !.
+
+		cacAux(_,[],_,[]).
+		cacAux(Vs,[A|T],Chosen,[(A,Best)|Rest]) :-
+		    calcOwned(Chosen, Owned), bestPosition(Vs,Chosen,Owned,Best), cacAux(Vs,T,[Best|Chosen],Rest).
+
+		allVertices(Vs) :- findall(V, (vertex(V,Val,_), Val \= unknown, Val \= 1), L), sort(L,Vs), !.
+		swarmAgents(As) :- timeToSwarm, swarmAgents(As,['Saboteur','Repairer']), !.
+		swarmAgents(As) :- swarmAgents(As,['Saboteur','Repairer','Explorer']), !.
+		swarmAgents(As,IgnoredRoles) :- findall(A, (agent(A), role(A,R), not(memberchk(R,IgnoredRoles))), L), sort(L,As), !.
+
+		swarmValue(Chosen,Val) :- findall(V, member((_,V), Chosen), L), calcOwned(L,Owned), swarmValueAux(Owned,Val).
+		swarmValueAux([],0).
+		swarmValueAux([V|T],Val) :-
+			swarmValueAux(T,Part), vertexValue(V,Tmp), (Tmp == unknown -> VVal = 1 ; VVal = Tmp), !, Val is Part + VVal.
+
+		bestPosition([],_,_,_) :- fail, !.
+		bestPosition(Vs,Chosen,Owned,Best) :-
+		    subtract(Vs,Chosen,NewVs), bpAux(NewVs,Chosen,Owned,_,Best).
+
+		bpAux([],_,_,0,_).
+		bpAux([V1|R],Chosen,Owned,MaxVal,Best) :- 
+			bpZoneVal(V1, Chosen, Owned, Val1),  bpAux(R,Chosen,Owned,Val2,V2), 
+			(Val1 > Val2 -> (Best = V1, MaxVal = Val1) ; (Best = V2, MaxVal = Val2)).
+
+		bpZoneVal(V,Chosen,Owned,Val) :-
+			vertex(V,VVal,_), neighbours(V,Ns), subtract(Ns,Owned, Ws), 
+			bpZoneValAux(Ws,Chosen,ValPart), Val is ValPart + VVal.
+
+		bpZoneValAux([],_,0).
+		bpZoneValAux([W|R], Chosen, ValSum) :-
+			neighbours(W,Tmp), intersection(Tmp,Chosen,Zs), vertex(W,Tmp2,_), (Tmp2 == unknown -> WVal = 1 ; WVal = Tmp2),
+			bpZoneValAuxAux(Zs,WVal,ValPart1), bpZoneValAux(R,Chosen,ValPart2), ValSum is ValPart1 + ValPart2.
+
+		bpZoneValAuxAux([],_,0).
+		bpZoneValAuxAux([_|R],WVal,ValSum) :-
+			bpZoneValAuxAux(R,WVal,ValPart), ValSum is WVal + ValPart.
+
+		calcOwned([],[]).
+		calcOwned(Chosen,Owned) :- Chosen = [_|T], coAux(Chosen,T,O), union(Chosen,O,Owned).
+		
+		coAux([H],[],[H]).
+		coAux([H|T],T,Owned) :- T = [N|R], neighborIntersect(H,T,O), coAux([N|R],R,O2), union(O,O2,Owned).
+		
+		neighborIntersect(_,[],[]).
+		neighborIntersect(V,[H|T],NI) :- neighbours(V,NV), neighbours(H,NH), intersection(NV,NH,X), neighborIntersect(V,T,Y), union(X,Y,NI).
+		
+		validSwarms(Swarms) :- not(memberchk((_,unknown),Swarms)), !.
+	
+		% Updates the list of nodes that still need to be probed
+		updateNeedExploring(A,B) :- findall(V, (member(V,A), needProbe(V)), B).
+	}
+
+	program[order=linearall]{
+		% If our last goto failed we are potentially under attack, fleeing might be nescessary
+		if bel(noFlee, lastAction(goto), lastActionResultFailed) then delete(noFlee).
+		
+		% Makes sure the graph administration is performed after a probe and other agents receive this new correct information
+		if bel(lastAction(probe), lastActionResult(successful)) then probeVertices.
+		
+		if bel(currentPos(Here), safePosForProbing(Here), noFlee) then delete(noFlee).
+
+		% Update needExploring if necessary
+		if bel(not(needExploring(unknown)),  needExploring(L), L \= [], updateNeedExploring(L,NewL)) then insert(not(needExploring(L)), needExploring(NewL)).
+		
+		% Decide on swarm positions if it is time to swarm
+		if bel(timeToDecideSwarm, !, me(Me), hasHighestRoleRank(Me), calcSwarms(Swarms,NewVal), validSwarms(Swarms), step(NewS), decidedSwarmAt(OldS), NewS \= OldS, currentSwarmValue(CurVal), NewVal > CurVal) then {
+			forall bel(member((A,Pos), Swarms)) do send(A,swarmPosition(Pos)) + insert(not(decidedSwarmAt(OldS)), decidedSwarmAt(NewS)) + insert(not(currentSwarmValue(CurVal)), currentSwarmValue(NewVal)).
+		}
+	}
+}
+
+% Sending messages specific for the Explorers
+module explorerReceiveMail{
+	program{
+		if true then exit-module.
+	}
+}
+
+% Module that makes sure an action is chosen for the Explorer
+module explorerAction{
+	knowledge {		
+		% If all this nodes neighbours are probed, it is to be considered as 'doneProbing'
+		%doneProbing(Here) :- findall(V, (vertex(Here, _, L), member([_, V], L), needProbe(V)), []).
+
+		% The list of vertices that still need to be probed
+		calculateNeedExploring(L) :- swarmPosition(MOpt), MOpt \= unknown, % If MOpt is unknown then we are not swarming yet
+	                                     findall(Opt, optimum(Opt), Opts),
+					     findall(V1,(member(O,Opts), neighbour(O,V1), needProbe(V1)), A),
+					     findall(V2,(member(N,A),    neighbour(N,V2), needProbe(V2)), B),
+					     append(A,B,C), append(Opts,C,D), sort(D,L).
+		
+		% This predicate determines when a node is to be considered safe to stand on, this means no unknown role agent (we have decided that there are 25% chance of still being safe, because there are only 4 out of 20 agents that are Saboteurs) or Saboteur can be at this location. We do not use safePos because we need to take chances when probing.
+		safePosForProbing(P) :- randomFloat(X), !, (safePos(P) ; X > 0.75).
+	}
+	program{
+		% If we are at an optimum then we shouldn't look for an optimum anymore
+		if a-goal(optimum), bel(currentPos(Pos), optimum(Pos), not(timeToSwarm)) then drop(optimum).
+
+		% Agent is not safe, defend yourself
+		if bel(not(noFlee), currentPos(Here), not(safePosForProbing(Here))) then defense.
+		
+		% probe your node if it is unprobed
+		if bel( not(disabled), currentPos(Here), needProbe(Here), me(Name), team(Team), 
+				findall(Agent, (visibleEntity(Agent,Here,Team,_), role(Agent,'Explorer')), Agents), agentRank(Agents,Name,Rank), Rank == 0) 
+			then selectProbe(Rank).
+		
+		% When optimum is found but certain nodevalues still need exploring enter the module that makes sure this happens
+		if not(goal(optimum)), bel(not(timeToSwarm)) then {
+			if bel(needExploring(unknown), calculateNeedExploring(List)) then insert(not(needExploring(unknown)), needExploring(List)) + searchPostOptimal.
+			if true then searchPostOptimal.
+		}
+
+		% If we are looking for an optimum enter the module that has optimum finding behavior
+		if a-goal(optimum) then searchOptimal.
+			
+		% When swarming then swarm
+		if a-goal(swarm) then swarm.
+	}
+}
+
+% Module that contains behavior for Explorers to find the optimal value node
+module searchOptimal {
+	program {
+		% if this vertex has a lower value than the last, track back to an unprobed neighbor of the last node
+		if bel(lastPos(Last), currentPos(Here), !, vertexValue(Here, Value), vertexValue(Last, OldValue), vertexValueGE(OldValue,Value),!, 
+				neighbour(Last, New), needProbe(New), neighbour(Here, New), safePosForProbing(New)) 
+				then advancedGoto(New) + insert(tookShortcut).
+		
+		% if this vertex has a lower value than the last, track back to the last node
+		if bel(lastPos(Last), currentPos(Here), !, vertexValue(Here, Value), vertexValue(Last, OldValue), vertexValueGT(OldValue,Value),!, safePosForProbing(Last)) 
+			then advancedGoto(Last).
+		
+		% find a probed neighboring vertex with a higher value and go to there
+		if bel(currentPos(Here), vertexValue(Here, Value), !, neighbour(ElseWhere), 
+				vertexValue(ElseWhere, EWValue), vertexValueGT(EWValue, Value), safePosForProbing(ElseWhere) ) 
+			then advancedGoto(ElseWhere).
+		
+		% find an unprobed neighboring vertex
+		if bel(neighbour(There), needProbe(There), safePosForProbing(There)) then advancedGoto(There).
+		
+		% find an unprobed neighboring vertex
+		if bel(neighbour(There), needProbe(There), not((visibleEntity(_, There, Team, _), enemyTeam(Team)))) 
+			then advancedGoto(There) + insert(noFlee).
+		
+		% find an unprobed neighboring vertex
+		if bel(neighbour(There), needProbe(There))
+			then advancedGoto(There) + insert(noFlee).
+		
+		% Find closest unprobed vertex
+		if bel(currentPos(Start), pathClosestNonProbed(Start, NonProbedVertex, [Here,Next|Path], Dist)) 
+			then advancedGoto(Next).
+	}
+}
+
+% Module to search randomly after we have found an optimum
+module searchPostOptimal {
+	program {
+		% Find the closest unprobed vertex which is a neighbor of a vertex which needs to be explored
+		if bel(currentPos(Here), pathClosestNonProbedWithExtraChecks(Here, _, [Here, Next | _], _))
+			then advancedGoto(Next).
+		
+		% find an unprobed neighboring vertex
+		if bel(neighbour(There), needProbe(There), safePosForProbing(There)) then advancedGoto(There).
+		
+		% find an unprobed neighboring vertex
+		if bel(neighbour(There), needProbe(There), not((visibleEntity(_, There, Team, _), enemyTeam(Team)))) 
+			then advancedGoto(There) + insert(noFlee).
+		
+		% find an unprobed neighboring vertex
+ 		if bel(neighbour(There), needProbe(There))
+			then advancedGoto(There) + insert(noFlee).
+		
+		% If all neighboring vertices has been probed determine if we need to survey
+                if bel(not(disabled), currentPos(Here), needSurvey(Here), agentRankHere(Rank))
+                        then selectSurvey(Rank).
+	
+		% Find closest unprobed vertex
+		if bel(currentPos(Start), pathClosestNonProbed(Start, NonProbedVertex, [Here,Next|Path], Dist)) 
+			then advancedGoto(Next).
+	}
+}

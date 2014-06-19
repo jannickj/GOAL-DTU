@@ -1,0 +1,186 @@
+%Saboteur specific Percept handeling
+module saboteurPercepts{
+	program[order=linearall]{
+		% When an agent is under attack (and hopefully swarming) then help it if we are the right Saboteur
+		if not(goal(harass(Goal1))), not(goal(hunt(Goal2))), bel(timeToHunt, !, findall(EID, (teamStatus(ID,V,_), role(ID,R), member(R,['Inspector','Sentinel','Explorer']), enemyStatus(EID,V,normal), inspectedEnemy(EID,'Saboteur')), L), randomElement(L,Enemy))
+			then adopt(hunt(Enemy)).
+	}
+}
+
+module saboteurReceiveMail{
+	program[order=linearall]{
+		if true then exit-module.
+	}
+}
+
+module saboteurAction{
+	knowledge {
+		enabledAllySaboteursHere :- currentPos(V), me(Me), team(T), visibleEntity(ID,V,T,normal), 
+	                                role(ID,'Saboteur'), ID \= Me.
+		enabledEnemiesHere(Role,S) :- currentPos(V), enemyTeam(T), !, 
+						  findall(ID,(visibleEntity(ID,V,T,normal),inspectedEnemy(ID,Role)),L), !, sort(L,S).
+		enabledEnemiesHereNotInList(Ignored,S) :- currentPos(V), enemyTeam(T), !,
+						  findall(ID,(visibleEntity(ID,V,T,normal),not(memberchk(ID,Ignored))),L), !, sort(L,S).
+
+		% Prioritize Saboteurs and Repairers over the others and prioritize Sentinel lowest
+		roleSortedEnemyList(L) :- enabledEnemiesHere('Saboteur',SL), enabledEnemiesHere('Repairer',RL),
+							enabledEnemiesHere('Sentinel',SeL), append(SL,RL,Tmp1), append(Tmp1,SeL,Tmp2),
+							enabledEnemiesHereNotInList(Tmp2,OL), append(Tmp1,OL,Tmp3), append(Tmp3,SeL,L).
+
+  		roleSelectAttackTarget(Target) :- 
+		                  me(Me), agentEnabledRoleRankHere(Me,Rank), roleSortedEnemyList(EL), nth0(Rank,EL,Target).
+
+		% Prevent a gigantic endless battle between enemy Repairers and us at this vertex
+		notRepairBlob :- enabledEnemyHere(EEID), dangerousEnemy(EEID), !.
+	 	notRepairBlob :- enabledEnemiesHere('Repairer',ERL), length(ERL,N), N < 3.
+
+		lowestRank(L) :- me(Me), length(L,N), agentRank(L,Me,Rank), M is N-1, Rank == M.
+	}
+	program{
+		% Determine if it is time to buy upgrades
+		if true then upgrades.
+		
+		% Hunt if we are supposed to help somebody
+		if not(goal(swarm)), a-goal(hunt(ID)) then hunt.
+		
+		% Try to harass the enemy's swarms if we are harassing
+		if a-goal(harass(There)) then harassGoto.
+		
+		% Harass sometimes with one Saboteur
+		if not(goal(harass(Pos))), bel( randomFloat(X), !, X > 0.5, me(Me), hasLowestRoleRank(Me), not(hasCheckedHarass)) then insert(hasCheckedHarass) + harassBegin.
+		
+		% If we have been attacking a Sentinel, and it parries, and there are an Explorer or Inspector nearby then attack that enemy instead
+		% (This can actually happen a lot when harassing)
+		if bel(not((enemyHere(X), dangerousEnemy(X))), lastActionResult(failed_parry), lastActionParam(SID), inspectedEnemy(SID,'Sentinel'), Rs = ['Explorer','Inspector']) then {
+			if bel(enabledEnemyHere(ID), currentPos(V), inspectedEnemy(ID,R), member(R,Rs)) then saboteurAttack(ID,V).
+			if bel(enabledEnemyNear(ID,V), inspectedEnemy(ID,R), member(R,Rs)) then saboteurAttack(ID,V).
+		}
+
+		% If we are at a large battle (i.e. some of our Saboteurs are not needed here) then we should move
+		if bel(currentPos(V), largeBattle(V,AL), (not(roleSelectAttackTarget(_)) ; (sort([Me|AL],AL2), lowestRank(AL2)))) then {
+			% Harass so we can get away
+			if bel(not(hasCheckedHarass)) then insert(hasCheckedHarass) + harassBegin.
+		
+			if bel(enabledEnemyNear(ID,Vertex), Vertex \= V) then saboteurAttack(ID,Vertex).
+			if bel(findall(N,neighbour(N),L), randomElement(L,X)) then advancedGoto(X).
+		}
+
+		% Attack enemy by rank if there are more ally Saboteurs here
+		if bel(currentPos(V), enabledAllySaboteursHere, roleSelectAttackTarget(ID), notRepairBlob) then saboteurAttack(ID,V).
+
+		% Attack enemy on this vertex.
+		% Preference to hit Saboteur over other targets.
+		% We prefer Explorers over Inspectors because they have less health
+		% We normally prefer to hit Inspectors and Explorers over Repairers because they cannot parry.
+		if bel(enabledEnemyHere(ID), currentPos(V)) then {
+			if bel(inspectedEnemy(ID,'Saboteur')) then saboteurAttack(ID,V).
+			if bel(inspectedEnemy(ID,'Inspector')) then saboteurAttack(ID,V).
+			if bel(inspectedEnemy(ID,'Repairer'), notRepairBlob) then saboteurAttack(ID,V).
+			if bel(inspectedEnemy(ID,'Explorer')) then saboteurAttack(ID,V).
+			if bel(notRepairBlob) then saboteurAttack(ID,V).
+		}
+		
+		% If another ally Saboteur is also at your location split up.
+		if bel(currentPos(Vertex),enabledEnemyNear(_,Y),!, visibleEntity(ID,Vertex,_,_), role(ID,'Saboteur'), not(me(ID)),!,
+			enabledEnemiesNear(List), agentRankHere(Rank) ) then gotoSplit(Rank,List).
+
+		% Attack enemy on nearby vertex
+		if bel(enabledEnemyNear(ID,Vertex), currentPos(V), Vertex \= V, not(inspectedEnemy(ID,'Sentinel')), notLargeBattle(Vertex)) then saboteurAttack(ID,Vertex).
+		if bel(enabledEnemyNear(ID,Vertex), currentPos(V), Vertex \= V, notLargeBattle(Vertex)) then saboteurAttack(ID,Vertex).
+		
+		% Attack enemies on optimums
+		if bel(currentPos(V), optimum(Opt), enemyStatus(ID,Opt,normal), inspectedEnemy(ID,R), member(R,['Inspector','Explorer']), path(V,Opt,[V,Next|_],_)) then advancedGoto(Next).
+		if bel(currentPos(V), optimum(Opt), enemyStatus(ID,Opt,normal), path(V,Opt,[V,Next|_],_)) then advancedGoto(Next).
+
+		% Attack nearest visible enemy
+		if bel( currentPos(Start), pathClosestVisibleEnemy(Start, LocationEnemy, NameEnemy, [Here,Next|Path], Dist),! )
+			then advancedGoto(Next).
+			
+		% Harass if nothing else, if we can find a suitable vertex
+		if bel(not(hasCheckedHarass)) then insert(hasCheckedHarass) + harassBegin.
+		
+		% Fail save
+		if true then explore.
+	}
+}
+
+module saboteurAttack(ID,Vertex){
+	program{
+		% Attack target if on this location.
+		if bel( currentPos(Vertex) ) then {
+			% If your last attack action was at the same target who parried and there is another active target hit the other instead
+			if bel( lastActionResult(Res), member(Res,[failed_parry,failed_in_range]), lastAction(attack), lastActionParam(ID), enabledEnemyHere(AID), AID \== ID ) then attack(AID).
+			if true then attack(ID).
+			if true then recharge.
+		}
+		
+		% Attack target on neighboring vertex now if it is useful
+		if bel(neighbour(Vertex), expectedEffectiveRange(attack,ER), rangedAttackEffect(1,EF), ER >= 0.5, EF > 0.5, not((lastAction(attack), lastActionParam(ID), lastActionResult(failed_in_range)))) then attack(ID).
+
+		% Goto vertex with enemy agent.
+		if true then advancedGoto(Vertex).
+	}
+}
+
+% Chase after and attack your target.
+module hunt{
+	program{
+		if goal(hunt(ID)), bel(enemyNear(ID,Vertex)) then saboteurAttack(ID,Vertex).
+		if goal(hunt(ID)), bel(enemyStatus(ID,Vertex,_),currentPos(Here),!,path(Here,Vertex,[Here,Next|List],_))
+			then advancedGoto(Next).
+		% if you can't find target then drop the hunt
+		if goal(hunt(ID)) then drop(hunt(ID)).
+	}
+}
+
+% Used to determine if we need to buy upgrades
+module upgrades{
+	% We should probably not buy more health than strength because it is less useful. And if we have more health than them then they will buy more strength, which in turn would make us buy more health (3 is the default strength)
+	knowledge{
+		shouldBuyStr(S) :- enemySaboteurSecondMaxHealth(Health), S < Health, !.
+		shouldBuyStr(S) :- me(Me), hasLowestRoleRank(Me), S < 6, !. % At least one Saboteur should be able to kill anybody in one round.
+		shouldBuyHP(H)  :- enemySaboteurSecondMaxStrength(Strength), H =< Strength, !.
+	}
+	program{
+		if bel(timeToBuy, not((enabledEnemyHere(ID), dangerousEnemy(ID))), strength(S), maxHealth(H), money(M), M >= 4) then {
+			% buy strength upgrade according to second highest inspected enemy Saboteur health
+			if bel(shouldBuyStr(S)) then {
+				if true then buy(sabotageDevice).
+				if true then recharge.
+			}
+			
+			% buy health upgrade according to second highest inspected enemy Saboteur strength
+			if bel(shouldBuyHP(H)) then {
+				if true then buy(shield).
+				if true then recharge.
+			}
+		}
+
+	}
+}
+
+% Attempt to find enemy "swarms" and harass them
+module harassGoto {
+	program{
+		% If we are near the harassment vertex then we should just proceed as usual
+		% Otherwise go towards the vertex
+		if goal(harass(There)), bel(currentPos(Here), Here \= There, ( (neighbour(Here,There), Next = There) ; path(Here, There, [Here,Next|_], _) ), !) then {
+			% Maybe we are at a neighbour to the harass vertex and there are an enemy here (in which case don't go towards the harass vertex)
+			if bel(enabledEnemyHere(ID), not(neighbour(Here,There))) then {			
+				% Maybe we are at a vertex together with an enemy and we might want to move towards our goal instead of attacking
+				if bel(enabledEnemyHere(ID), randomFloat(X), !, X > 0.5) then advancedGoto(Next).
+                
+                % Otherwise, exit the module
+			}
+            % Otherwise move towards the vertex
+            if bel(not(enabledEnemyHere(ID))) then advancedGoto(Next).
+		}
+	}
+}
+
+module harassBegin {
+	program {
+		if not(goal(harass(Goal))), bel(timeToHarass, possibleHarassVertex(Pos), step(Step), harassStart(Old)) 
+			then adopt(harass(Pos)) + delete(harassStart(Old)) + insert(harassStart(Step)).
+	}
+}

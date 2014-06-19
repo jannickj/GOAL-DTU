@@ -1,0 +1,10 @@
+119,122d118
+< 		str = root.getAttribute("timestamp");
+< 		assert str != null && str.equals("") == false : XMLToString(document);
+< 		long timestamp = new Long(str).longValue();
+< 		ret.add(new Percept("timestamp",new Numeral(timestamp)));
+127,130d122
+< 		str = perception.getAttribute("deadline");
+< 		assert str != null && str.equals("") == false : XMLToString(document);
+< 		long deadline = new Long(str).longValue();
+< 		ret.add(new Percept("deadline",new Numeral(deadline)));

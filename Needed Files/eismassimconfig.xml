@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interfaceConfig scenario="mars2013" host="localhost" port="12300" scheduling="no" times="no" notifications="no" queued="yes" statisticsFile="no" statisticsShell="no" submitStatistic="no" workaroundJPL="yes">
+  <entities>
+    <entity name="GOAL-DTU1" username="GOAL-DTU1" password="pass" iilang="no" xml="yes" printPercepts="no" measureActionTime="yes"/>
+    <entity name="GOAL-DTU2" username="GOAL-DTU2" password="pass" iilang="no" xml="yes" printPercepts="no" measureActionTime="yes"/>
+    <entity name="GOAL-DTU3" username="GOAL-DTU3" password="pass" iilang="no" xml="yes" printPercepts="no" measureActionTime="yes"/>
+    <entity name="GOAL-DTU4" username="GOAL-DTU4" password="pass" iilang="no" xml="yes" printPercepts="no" measureActionTime="yes"/>
+    <entity name="GOAL-DTU5" username="GOAL-DTU5" password="pass" iilang="no" xml="yes" printPercepts="no" measureActionTime="yes"/>
+    <entity name="GOAL-DTU6" username="GOAL-DTU6" password="pass" iilang="no" xml="yes" printPercepts="no" measureActionTime="yes"/>
+    <entity name="GOAL-DTU7" username="GOAL-DTU7" password="pass" iilang="no" xml="yes" printPercepts="no" measureActionTime="yes"/>
+    <entity name="GOAL-DTU8" username="GOAL-DTU8" password="pass" iilang="no" xml="yes" printPercepts="no" measureActionTime="yes"/>
+    <entity name="GOAL-DTU9" username="GOAL-DTU9" password="pass" iilang="no" xml="yes" printPercepts="no" measureActionTime="yes"/>
+    <entity name="GOAL-DTU10" username="GOAL-DTU10" password="pass" iilang="no" xml="yes" printPercepts="no" measureActionTime="yes"/>
+    <entity name="GOAL-DTU11" username="GOAL-DTU11" password="pass" iilang="no" xml="yes" printPercepts="no" measureActionTime="yes"/>
+    <entity name="GOAL-DTU12" username="GOAL-DTU12" password="pass" iilang="no" xml="yes" printPercepts="no" measureActionTime="yes"/>
+    <entity name="GOAL-DTU13" username="GOAL-DTU13" password="pass" iilang="no" xml="yes" printPercepts="no" measureActionTime="yes"/>
+    <entity name="GOAL-DTU14" username="GOAL-DTU14" password="pass" iilang="no" xml="yes" printPercepts="no" measureActionTime="yes"/>
+    <entity name="GOAL-DTU15" username="GOAL-DTU15" password="pass" iilang="no" xml="yes" printPercepts="no" measureActionTime="yes"/>
+    <entity name="GOAL-DTU16" username="GOAL-DTU16" password="pass" iilang="no" xml="yes" printPercepts="no" measureActionTime="yes"/>
+    <entity name="GOAL-DTU17" username="GOAL-DTU17" password="pass" iilang="no" xml="yes" printPercepts="no" measureActionTime="yes"/>
+    <entity name="GOAL-DTU18" username="GOAL-DTU18" password="pass" iilang="no" xml="yes" printPercepts="no" measureActionTime="yes"/>
+    <entity name="GOAL-DTU19" username="GOAL-DTU19" password="pass" iilang="no" xml="yes" printPercepts="no" measureActionTime="yes"/>
+    <entity name="GOAL-DTU20" username="GOAL-DTU20" password="pass" iilang="no" xml="yes" printPercepts="no" measureActionTime="yes"/>
+    <entity name="GOAL-DTU21" username="GOAL-DTU21" password="pass" iilang="no" xml="yes" printPercepts="no" measureActionTime="yes"/>
+    <entity name="GOAL-DTU22" username="GOAL-DTU22" password="pass" iilang="no" xml="yes" printPercepts="no" measureActionTime="yes"/>
+    <entity name="GOAL-DTU23" username="GOAL-DTU23" password="pass" iilang="no" xml="yes" printPercepts="no" measureActionTime="yes"/>
+    <entity name="GOAL-DTU24" username="GOAL-DTU24" password="pass" iilang="no" xml="yes" printPercepts="no" measureActionTime="yes"/>
+    <entity name="GOAL-DTU25" username="GOAL-DTU25" password="pass" iilang="no" xml="yes" printPercepts="no" measureActionTime="yes"/>
+    <entity name="GOAL-DTU26" username="GOAL-DTU26" password="pass" iilang="no" xml="yes" printPercepts="no" measureActionTime="yes"/>
+    <entity name="GOAL-DTU27" username="GOAL-DTU27" password="pass" iilang="no" xml="yes" printPercepts="no" measureActionTime="yes"/>
+    <entity name="GOAL-DTU28" username="GOAL-DTU28" password="pass" iilang="no" xml="yes" printPercepts="no" measureActionTime="yes"/>
+  </entities>
+</interfaceConfig>

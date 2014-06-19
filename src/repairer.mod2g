@@ -1,0 +1,135 @@
+module repairerPercepts{
+	program[order=linearall]{
+		if true then exit-module.
+	}
+}
+
+module repairerReceiveMail{
+	program[order=linearall]{
+		if true then exit-module.
+	}
+}
+
+module repairerAction{
+	knowledge {
+		isDamaged('Saboteur',HP)  :- HP < 3.
+		isDamaged('Repairer',HP)  :- HP < 6.
+		isDamaged('Inspector',HP) :- HP < 6.
+		isDamaged('Explorer',HP)  :- HP < 4.
+		disabledAllyHere(ID) :- currentPos(Here), team(Team), me(Me), visibleEntity(ID,Here,Team,disabled), ID \= Me.
+		damagedAllyHere(ID) :- currentPos(Here), me(Me), teamStatus(ID,Here,HP), ID \= Me, role(ID,Role), isDamaged(Role,HP).
+		disabledImportantAllyHere(ID) :- disabledAllyHere(ID), role(ID,R), member(R,['Repairer','Saboteur']).
+		damagedImportantAllyHere(ID)  :- damagedAllyHere(ID),  role(ID,R), member(R,['Repairer','Saboteur']).
+		allyRepairersAt(V, RN) :- me(Me), findall(Id, (teamStatus(Id,V,HP), HP \= 0, Id \= Me, role(Id, 'Repairer')), RL), !, length(RL,RN).
+		enabledEnemySaboteursHere(L) :- currentPos(V), enemyTeam(T), findall(ID, (visibleEntity(ID,V,T,normal), dangerousEnemy(ID)), Tmp), sort(Tmp,L).
+		enabledAllySaboteursHere(L) :- currentPos(V), team(T), findall(ID, (visibleEntity(ID,V,T,normal),role(ID,'Saboteur')), Tmp), sort(Tmp,L).
+		
+		% Likely targets for the enemy are our enabled Saboteurs. If the enemy has enough enabled Saboteurs to target all our enabled Saboteurs then our enabled Saboteurs are likely to be attacked the next round.
+		likelyTargets(L) :- enabledEnemySaboteursHere(EL), enabledAllySaboteursHere(AL), length(EL,EN), length(AL,AN), ((EN >= AN, L = AL) ; (EN < AN, L = [])).
+		disabledAt(V, DN) :- me(Me), findall(Id, (teamStatus(Id,V,0), Id  \= Me), DL), !, length(DL,DN).
+		insufficientRepairersAt(V) :- currentPos(H), H \= V, allyRepairersAt(V,RN), disabledAt(V,DN), DN > RN.
+		enabledAllyRepairersHere :- currentPos(V), me(Me), team(T), visibleEntity(ID,V,T,normal), role(ID,'Repairer'), ID \= Me, !.
+
+		% Create a list of ally agents to determine who to repair first. It is important to note that non-disabled agents can still be repaired if they are deemed to be attacked next round because both attack actions and determining disabled agents are processed before repair actions by the server.
+		roleSortedDisabledHere(L) :- findall(ID,(disabledAllyHere(ID),role(ID,'Saboteur')),SLTmp),
+                            findall(ID,(disabledAllyHere(ID),role(ID,'Repairer')),RLTmp),
+							likelyTargets(TLTmp), sort(TLTmp,TL),
+                            findall(ID,(disabledAllyHere(ID),role(ID,R),not(member(R,['Saboteur','Repairer']))),OLTmp),
+                            findall(ID,damagedAllyHere(ID),DLTmp),
+                            sort(SLTmp,SL), sort(RLTmp,RL), sort(OLTmp,OL), sort(DLTmp,DL),
+                            append(SL,TL,Tmp), append(Tmp,RL,Tmp2), append(Tmp2,OL,Tmp3), append(Tmp3,DL,L).
+		
+		allDisabledNear(L) :- findall((V,ID),(teamStatus(ID,V,0),neighbour(V)),X),!,sort(X,S),findall(A,member((_,A),S),L).
+		
+		roleSelectRepairTargetHere(Target) :- me(Me), agentEnabledRoleRankHere(Me,Rank), roleSortedDisabledHere(RL), nth0(Rank,RL,Target).
+		roleSelectRepairTargetNear(Target) :- me(Me), agentEnabledRoleRankHere(Me,Rank), allDisabledNear(RL), nth0(Rank,RL,Target).
+		
+		disabledAgentToRepair(Agent,There) :- me(Me), currentPos(Pos), 
+			findall((ID,V), (teamStatus(ID,V,0), ID \= Me, V \= Pos), L1), 
+			findall((ID,V), (teamStatus(ID,V,0), ID \= Me, V \= Pos, role(ID,R), member(R,['Sentinel','Repairer','Saboteur'])), L2), 
+			append(L1,L2,L), randomElement(L,(Agent,There)), !.
+
+	}
+	program{
+		% Repair the agents that I have committed myself to repair if they are close by
+		if a-goal(repairing(ID)), bel(not(disabled), currentPos(V), teamStatus(ID,Pos,_)) then {
+			if bel(Pos == V) then repairerRepair(ID,V).
+			if bel(neighbour(Pos)) then repairerRepair(ID,Pos).
+			if bel(me(Me), hasLowestRoleRank(Me), path(V,Pos,[V,N|T],_)) then repairerRepair(ID,N).
+		}
+		
+		% It is necessary to repair the other agents that are not at a large battle
+		if bel(currentPos(V), largeBattle(V,_), me(Me), hasLowestRoleRank(Me)) then repairCommitBegin.
+		
+		% Fix ally here, delegating the repair tasks among all the ally Repairers at this vertex
+		if bel(currentPos(V), enabledAllyRepairersHere, roleSelectRepairTargetHere(ID)) then {
+			% If the chosen target is actually me then repair someone else! (We want the other Repairer(s) to repair me so we do not want to move away yet)
+			if bel(me(ID), disabledAllyNear(ID2,V2)) then repairerRepair(ID2,V2).
+			% Otherwise just proceed
+			if true then repairerRepair(ID,V).
+		}
+
+		% Fix ally here, when there are no other enabled ally repairers here, prioritizing Saboteurs and Repairers
+		if bel(currentPos(V), not(enabledAllyRepairersHere)) then {
+			if bel(disabledImportantAllyHere(ID)) then repairerRepair(ID,V).
+			if bel(damagedImportantAllyHere(ID)) then repairerRepair(ID,V).
+			if bel(disabledAllyHere(ID)) then repairerRepair(ID,V).
+			if bel(damagedAllyHere(ID)) then repairerRepair(ID,V).
+		}
+		
+		% Fix a nearby ally. It is important that not all Repairers at the vertex moves to repair the same target.
+		% It is also important that not too many Repairers move a lot if they currently are in a large battle, because this could shift the battle towards our swarms as the disabled allies are probably coming from the swarms
+		% (they cannot come from large battles and not many agents are doing much else than swarming or fighting at a vertex).
+		if bel(disabledAllyNear(ID,Vertex), insufficientRepairersAt(Vertex), currentPos(Pos)) then { 
+			if bel(enabledAllyRepairersHere, not(roleSelectRepairTargetHere(_)), roleSelectRepairTargetNear(ID2)) then repairerRepair(ID2,Vertex).
+			if bel(not(enabledAllyRepairersHere)) then repairerRepair(ID,Vertex).
+		}
+
+		% Go towards the agent that I want to repair
+		if a-goal(repairing(ID)), bel(not(disabled), currentPos(H), teamStatus(ID,T,_), path(H,T,[H,N|R],_)) then repairerRepair(ID,N).
+
+		% Find an ally to repair and commit to it
+		if true then repairCommitBegin.
+		
+		% Find help, because I am disabled.
+		if bel(disabled) then disabled.
+		
+		% Defend if my current location has dangerous enemies nearby.
+		if bel(currentPos(Here), not(safePos(Here))) then defense.
+
+		% Swarm if I should swarm
+		if a-goal(swarm) then swarm.
+		
+		% Explore the map.
+		if true then explore.
+	}
+}
+
+module repairerRepair(ID,Vertex){
+	program{
+		if bel(me(Me), ID \= Me) then {
+			% Repair target at this vertex if possible. Defend yourself if necessary.
+			if bel(currentPos(Here), visibleEntity(ID,Here,_,_)) then {
+				if true then repair(ID).
+				if bel(not(safePos(Here))) then defense.
+				if true then recharge.
+			}
+
+			% If the target is on a neighboring vertex then consider repairing it right now.
+			if bel(neighbour(There), visibleEntity(ID,There,_,_), expectedEffectiveRange(repair,ER), rangedRepairEffect(1,ID,EF), ER >= 0.5, EF > 0.5, not((lastAction(repair), lastActionParam(ID), lastActionResult(failed_in_range)))) then repair(ID).
+
+			% Goto vertex with disabled/injured agent.
+			if true then advancedGoto(Vertex).
+		}
+	}
+}
+
+module repairCommitBegin {
+	program {
+		% Find an ally to repair and commit to it
+		if not(goal(repairing(ID))), bel(not(disabled), currentPos(Here), disabledAgentToRepair(Agent,There)) then {
+			if bel(neighbour(There)) then repairerRepair(Agent,There) + adopt(repairing(Agent)).
+			if bel(path(Here,There,[Here,Next|_],_)) then repairerRepair(Agent,Next) + adopt(repairing(Agent)).
+		}
+	}
+}
